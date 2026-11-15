@@ -15,3 +15,5 @@ data/
 temp.txt
 .uv/
 *.pyc
+*.bin
+*.json

@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import load_dataset  # type: ignore
 from pathlib import Path
 
 DATASET_PATH = Path(r"data")

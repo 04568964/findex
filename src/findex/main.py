@@ -5,6 +5,20 @@ from findex.iter_documents import read_file, greedy_read_files
 from findex.tokenizer import tokenizer
 from pathlib import Path
 
+
+
+
+#TEMP
+from operator import itemgetter
+import heapq
+def least_common_values(array, to_find=None):
+    counter = Counter(array)
+    if to_find is None:
+        return sorted(counter.items(), key=itemgetter(1), reverse=False)
+    return heapq.nsmallest(to_find, counter.items(), key=itemgetter(1))
+#TEMP
+
+
 def main():
     data_path = Path("data")
 
@@ -14,7 +28,7 @@ def main():
     total_tokens_count = 0
     vocab = Counter()
 
-    for text in read_file(data_path):
+    for filename, text in read_file(data_path):
         doc_counter +=1
         for token in tokenizer(text):
             total_tokens_count +=1
@@ -52,7 +66,7 @@ def main():
     print(f"Загальна кількість токенів: {total_tokens_count}")
     print(f"Унікальних слів: {len(vocab)}")
 
-    for word, count in vocab.most_common(50):
+    for word, count in least_common_values(vocab,2):
         print(f"{word} : {count}")
 
         
