@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from findex.indexer import build_index
+from findex.indexer import ExecutorName, build_index
 from findex.scorers import BM25, Scorer, TfIdf
 from findex.searcher import Searcher
 from findex.storage import open_index, save_index
@@ -55,6 +55,14 @@ def index(
     data_dir: Annotated[Path, typer.Argument(help="Directory with .txt documents.")],
     out: Annotated[Path, typer.Option("--out", "-o", help="Output index file.")] = Path("index.bin"),
     positions: Annotated[bool, typer.Option("--positions", help="Store token positions.")] = False,
+    workers: Annotated[
+        int,
+        typer.Option("--workers", "-w", min=1, help="Number of worker threads/processes."),
+    ] = 1,
+    executor: Annotated[
+        ExecutorName,
+        typer.Option("--executor", "-e", help="Execution strategy."),
+    ] = "serial",
 ) -> None:
     if not data_dir.is_dir():
         _fail(f"Data directory not found: {data_dir}")
@@ -64,8 +72,8 @@ def index(
         TextColumn("[progress.description]{task.description}"),
         console=err_console,
     ) as progress:
-        task = progress.add_task("Building index...", total=None)
-        idx = build_index(data_dir, with_positions=positions)
+        task = progress.add_task(f"Building index ({executor}, workers={workers})...", total=None)
+        idx = build_index(data_dir, with_positions=positions, workers=workers, executor=executor)
         progress.update(task, description="Saving index...")
         save_index(idx, out)
 
