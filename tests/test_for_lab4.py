@@ -167,7 +167,7 @@ def test_prop_postings_always_sorted(docs_text: list[str]) -> None:
         ids = [p.doc_id for p in idx[term]]
         assert ids == sorted(ids)
 
-
+@pytest.mark.slow
 @given(
     terms=st.dictionaries(
         keys=st.text(alphabet="abc", min_size=1, max_size=5),
