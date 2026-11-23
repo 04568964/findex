@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import sys
@@ -6,9 +7,11 @@ from typing import Annotated, Literal, NoReturn
 
 import typer
 from rich.console import Console
+from rich.live import Live
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from findex.crawler import CrawlStats, crawl
 from findex.indexer import ExecutorName, build_index
 from findex.scorers import BM25, Scorer, TfIdf
 from findex.searcher import Searcher
@@ -140,3 +143,57 @@ def stats(
         table.add_row("Avg doc length", f"{idx.avg_doc_length:.2f}")
         table.add_row("Has positions", str(idx.has_positions))
         out_console.print(table)
+
+@app.command(name="crawl")
+def crawl_cmd(
+    start_url: Annotated[str, typer.Argument(help="Starting URL to crawl.")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output JSONL file.")] = Path("pages.jsonl"),
+    max_pages: Annotated[int, typer.Option("--max-pages", min=1, help="Maximum pages to crawl.")] = 200,
+    concurrency: Annotated[int, typer.Option("--concurrency", "-c", min=1, help="Global concurrency.")] = 5,
+    per_host: Annotated[int, typer.Option("--per-host", min=1, help="Max requests per host.")] = 2,
+    delay: Annotated[float, typer.Option("--delay", min=0.0, help="Min delay per host (s).")] = 0.2,
+    log: Annotated[Path, typer.Option("--log", help="Crawl log file.")] = Path("crawl.log"),
+    debug: Annotated[bool, typer.Option("--debug", help="Run asyncio event loop in debug mode.")] = False,
+) -> None:
+    stats = CrawlStats()
+
+    def _render_table() -> Table:
+        table = Table(title="findex crawl")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Pages collected", f"{stats.fetched} / {max_pages}")
+        table.add_row("Pages / sec", f"{stats.pages_per_sec:.2f}")
+        table.add_row("In-flight", str(stats.in_flight))
+        table.add_row("Errors", str(stats.errors))
+        table.add_row("Queue depth", str(stats.queue_size))
+        return table
+
+    async def _run() -> None:
+        with Live(_render_table(), console=err_console, refresh_per_second=4) as live:
+            async for page in crawl(
+                start_url,
+                max_pages=max_pages,
+                concurrency=concurrency,
+                per_host_concurrency=per_host,
+                host_delay=delay,
+                stats=stats,
+                log_path=log,
+            ):
+                record = {
+                    "url": page.url,
+                    "title": page.title,
+                    "text": page.text,
+                    "status": page.status,
+                    "size_bytes": page.size_bytes,
+                    "elapsed_s": round(page.elapsed_s, 4),
+                }
+                line = json.dumps(record, ensure_ascii=False) + "\n"
+                await asyncio.to_thread(f.write, line)
+                await asyncio.to_thread(f.flush)
+                live.update(_render_table())
+            live.update(_render_table())
+
+    with open(out, "w", encoding="utf-8") as f:
+        asyncio.run(_run(), debug=debug)
+
+    err_console.print(f"Crawled {stats.fetched} pages ({stats.errors} errors) -> {out}")

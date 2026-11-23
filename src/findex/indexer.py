@@ -88,6 +88,9 @@ def build_index(
     workers: int = 1,
     executor: ExecutorName = "serial",
 ) -> Index:
+    p = Path(data_dir)
+    if p.is_file() and p.suffix == ".jsonl":
+        return _build_from_jsonl(p, with_positions=with_positions)
     all_paths = sorted(Path(data_dir).glob("*.txt"))
     if not all_paths:
         return Index({}, {}, has_positions=with_positions)
@@ -107,3 +110,33 @@ def build_index(
         partials = [f.result() for f in futures]
 
     return merge_indexes(partials)
+
+def _build_from_jsonl(jsonl_path: Path, with_positions: bool) -> Index:
+    import json
+
+    postings_map: dict[str, list[Posting]] = defaultdict(list)
+    docs: dict[int, DocMeta] = {}
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for doc_id, line in enumerate(f):
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            url = str(rec["url"])
+            title = str(rec.get("title") or url)
+            tokens = list(tokenizer(str(rec.get("text", ""))))
+            docs[doc_id] = DocMeta(doc_id=doc_id, path=url, title=title, length=len(tokens))
+            if with_positions:
+                pos_map: dict[str, list[int]] = defaultdict(list)
+                for pos, tok in enumerate(tokens):
+                    pos_map[tok].append(pos)
+                for term, positions in pos_map.items():
+                    postings_map[term].append(
+                        Posting(doc_id=doc_id, freq=len(positions), positions=tuple(positions))
+                    )
+            else:
+                freq_map: dict[str, int] = defaultdict(int)
+                for tok in tokens:
+                    freq_map[tok] += 1
+                for term, freq in freq_map.items():
+                    postings_map[term].append(Posting(doc_id=doc_id, freq=freq))
+    return Index(dict(postings_map), docs, has_positions=with_positions)
