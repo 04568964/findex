@@ -1,61 +1,51 @@
 import argparse
+import logging
 import time
 import tracemalloc
 
-from findex.storage import load_index_pickle
-from findex.searcher import (
-    search_merge, search_set, 
-    search_merge_or, search_set_or, 
-    search_merge_not, search_set_not
-)
+from findex.scorers import BM25, TfIdf
+from findex.searcher import Searcher
+from findex.storage import open_index
 
-def main():
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+
     parser = argparse.ArgumentParser(description="Пошук по індексу.")
     parser.add_argument("index_file", type=str, help="Шлях до файлу індексу")
-    parser.add_argument("query", type=str, help='Запит у форматі term1 AND term2')
-    parser.add_argument("--engine", choices=["merge", "set"], default="merge", help="Алгоритм пошуку")
+    parser.add_argument("query", type=str, help="Пошуковий запит")
+    parser.add_argument("--scorer", choices=["bm25", "tfidf"], default="bm25", help="Алгоритм ранжування")
+    parser.add_argument("--top-k", type=int, default=5, help="Кількість результатів")
+    parser.add_argument("--no-snippets", action="store_true", help="Не генерувати сніпети")
     args = parser.parse_args()
 
     tracemalloc.start()
     start_time = time.perf_counter()
 
-    inv_index, doc_meta = load_index_pickle(args.index_file)  
-    load_time = time.perf_counter()
+    scorer = BM25() if args.scorer == "bm25" else TfIdf()
 
-    parts = args.query.split()
-    if len(parts) != 3:
-        print("Помилка: запит має бути у форматі: term1 AND term2)")
-        return
+    with open_index(args.index_file) as index:
+        load_time = time.perf_counter()
+        searcher = Searcher(index, scorer=scorer)
+        results = searcher.search(args.query, top_k=args.top_k, with_snippets=not args.no_snippets)
 
-    term1, operator, term2 = parts[0].lower(), parts[1].upper(), parts[2].lower()
-
-    if operator == "AND":
-        func = search_merge if args.engine == "merge" else search_set
-    elif operator == "OR":
-        func = search_merge_or if args.engine == "merge" else search_set_or
-    elif operator == "NOT":
-        func = search_merge_not if args.engine == "merge" else search_set_not
-    else:
-        print(f"Невідомий оператор: {operator}")
-        return
-
-    doc_ids = func(inv_index, term1, term2)
-    
-    now, peak = tracemalloc.get_traced_memory()
+    _, peak = tracemalloc.get_traced_memory()
     end_time = time.perf_counter()
     tracemalloc.stop()
 
-    print(f"\n--- Результати для '{args.query}' (через {args.engine}) ---")
-    print(f"Знайдено документів: {len(doc_ids)}")
-    
-    for d_id in doc_ids[:5]:
-        filename = doc_meta[d_id].filename
-        print(f" - {filename}")
-        
+    print(f"\n--- Результати для '{args.query}' ({args.scorer}) ---")
+    print(f"Показано результатів: {len(results)}")
+
+    for res in results:
+        print(f"[{res.score:.4f}] {res.title} ({res.path})")
+        if res.snippet:
+            print(f"  {res.snippet}")
+
     print("=" * 40)
     print(f"Час завантаження: {load_time - start_time:.4f} с")
     print(f"Час пошуку: {end_time - load_time:.6f} с")
     print(f"Пікове навантаження: {peak / (1024 * 1024):.2f} MB")
+
 
 if __name__ == "__main__":
     main()

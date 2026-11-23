@@ -1,8 +1,12 @@
 import pickle
 import json
 from dataclasses import asdict
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from findex.models import Posting, DocMeta
-
+from findex.models import Index
+from findex.timing import timed
 def save_index_pickle(inv_index, doc_meta, filepath):
     with open(filepath, "wb") as f:
         pickle.dump({"index" : inv_index, "meta" : doc_meta}, f)
@@ -41,3 +45,25 @@ def load_index_json(filepath):
         for doc_id, meta in data["meta"].items()
     }
     return inv_index, doc_meta
+
+
+@timed
+def load_index(path: str | Path) -> Index:
+    with open(path, "rb") as f:
+        obj = pickle.load(f)
+    if not isinstance(obj, Index):
+        raise TypeError(f"Expected Index, got {type(obj).__name__}")
+    return obj
+
+@contextmanager
+def open_index(path: str | Path) -> Iterator[Index]:
+    index = load_index(path)
+    try:
+        yield index
+    finally:
+        index.close()
+
+@timed
+def save_index(index: Index, path: str | Path) -> None:
+    with open(path, "wb") as f:
+        pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
