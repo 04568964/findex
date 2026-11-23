@@ -1,5 +1,6 @@
 from findex.tokenizer import tokenizer
 
+
 def test_basic_words():
     text = "Hello World"
     assert list(tokenizer(text)) == ["hello", "world"]

@@ -49,7 +49,9 @@ class Phrase(QueryNode):
             return set()
 
         posting_maps = [{p.doc_id: set(p.positions) for p in index[t]} for t in self.terms]
-        common_docs = set.intersection(*(set(m.keys()) for m in posting_maps))
+        common_docs: set[int] = set(posting_maps[0].keys())
+        for m in posting_maps[1:]:
+            common_docs.intersection_update(m.keys())
 
         matched: set[int] = set()
         for doc_id in common_docs:

@@ -1,15 +1,14 @@
 import logging
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, TypeVar
 
-F = TypeVar("F", bound=Callable[..., Any])
 logger = logging.getLogger("findex")
 
 
-def timed(func: F) -> F:
+def timed[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         start = time.perf_counter()
         try:
             return func(*args, **kwargs)

@@ -17,3 +17,7 @@ temp.txt
 *.pyc
 *.bin
 *.json
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage

@@ -1,4 +1,5 @@
 import pytest
+
 from findex.models import DocMeta, Index, Posting
 from findex.parser import And, Not, Or, Phrase, Term, parse_query
 from findex.scorers import BM25, TfIdf
@@ -39,10 +40,9 @@ def test_index_mapping_and_context_manager(tmp_path) -> None:
     out = tmp_path / "idx.bin"
     save_index(idx, out)
 
-    with pytest.raises(RuntimeError):
-        with open_index(out) as loaded:
-            assert "python" in loaded
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), open_index(out) as loaded:
+        assert "python" in loaded
+        raise RuntimeError("boom")
     assert len(loaded) == 0
 
 

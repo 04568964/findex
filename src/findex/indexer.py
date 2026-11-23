@@ -39,19 +39,3 @@ def build_index(data_dir: str | Path, with_positions: bool = False) -> Index:
                 postings_map[term].append(Posting(doc_id=doc_id, freq=freq))
 
     return Index(dict(postings_map), docs, has_positions=with_positions)
-
-from array import array
-
-def build_index_array_test(data_path):
-    inv_index = defaultdict(lambda: array('I')) 
-    doc_meta = {}
-
-    for doc_id, (filename, text) in enumerate(read_file(data_path)):
-        tokens = list(tokenizer(text))
-        doc_meta[doc_id] = DocMeta(doc_id=doc_id, filename=filename, length=len(tokens))
-        term_freqs = Counter(tokens)
-        
-        for term, freq in term_freqs.items():
-            inv_index[term].extend([doc_id, freq])
-            
-    return dict(inv_index), doc_meta

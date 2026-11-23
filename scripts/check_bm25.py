@@ -17,25 +17,25 @@ def main() -> None:
         doc_id = rare_p.doc_id
         s_rare = bm25.score(rare_term, Posting(doc_id, 1), index)
         s_common = bm25.score(common_term, Posting(doc_id, 1), index)
-        print("1. Рідкісний vs частий термін (однаковий doc_id, tf=1):")
-        print(f"   '{rare_term}' (df={index.df(rare_term)}): {s_rare:.4f}")
-        print(f"   '{common_term}' (df={index.df(common_term)}): {s_common:.4f}\n")
+        print("Порівняння рідкісної та частого терміну (однаковий doc_id, tf=1):")
+        print(f"'{rare_term}' (df={index.df(rare_term)}): {s_rare:.4f}")
+        print(f"'{common_term}' (df={index.df(common_term)}): {s_common:.4f}\n")
         term = "university"
         s1 = bm25.score(term, Posting(doc_id, 1), index)
         s19 = bm25.score(term, Posting(doc_id, 19), index)
         s20 = bm25.score(term, Posting(doc_id, 20), index)
-        print(f"2. Насичення TF для '{term}' (df={index.df(term)}):")
-        print(f"   tf=1:  {s1:.4f}")
-        print(f"   tf=19: {s19:.4f}")
-        print(f"   tf=20: {s20:.4f} (приріст: +{s20 - s19:.6f})\n")
+        print(f"Насичення TF для '{term}' (df={index.df(term)}):")
+        print(f"tf=1:  {s1:.4f}")
+        print(f"tf=19: {s19:.4f}")
+        print(f"tf=20: {s20:.4f} (приріст: +{s20 - s19:.6f})\n")
         single_occ = [p for p in index[term] if p.freq == 1]
         short_p = min(single_occ, key=lambda p: index.docs[p.doc_id].length)
         long_p = max(single_occ, key=lambda p: index.docs[p.doc_id].length)
         s_short = bm25.score(term, short_p, index)
         s_long = bm25.score(term, long_p, index)
-        print(f"3. Нормалізація довжини для '{term}' (tf=1):")
-        print(f"   Короткий (doc={index.docs[short_p.doc_id].title}, len={index.docs[short_p.doc_id].length}): {s_short:.4f}")
-        print(f"   Довгий   (doc={index.docs[long_p.doc_id].title}, len={index.docs[long_p.doc_id].length}): {s_long:.4f}")
+        print(f"Нормалізація довжини для '{term}' (tf=1):")
+        print(f"Короткий (doc={index.docs[short_p.doc_id].title}, len={index.docs[short_p.doc_id].length}): {s_short:.4f}")
+        print(f"Довгий (doc={index.docs[long_p.doc_id].title}, len={index.docs[long_p.doc_id].length}): {s_long:.4f}")
 
 
 if __name__ == "__main__":

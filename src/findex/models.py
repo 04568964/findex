@@ -57,6 +57,14 @@ class Index(Mapping[str, list[Posting]]):
             f"docs={self.num_docs}, "
             f"has_positions={self.has_positions})"
         )
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Index):
+            return NotImplemented
+        return (
+            self._postings == other._postings
+            and self.docs == other.docs
+            and self.has_positions == other.has_positions
+        )
 
     @property
     def num_docs(self) -> int:
