@@ -197,3 +197,19 @@ def crawl_cmd(
         asyncio.run(_run(), debug=debug)
 
     err_console.print(f"Crawled {stats.fetched} pages ({stats.errors} errors) -> {out}")
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option("--host", help="Bind host.")] = "0.0.0.0",
+    port: Annotated[int, typer.Option("--port", "-p", min=1, max=65535, help="Bind port.")] = 8000,
+    workers: Annotated[int, typer.Option("--workers", "-w", min=1, help="Uvicorn worker processes.")] = 1,
+    index_path: Annotated[Path | None, typer.Option("--index", help="Path to index file (overrides INDEX_PATH).")] = None,
+) -> None:
+    import os
+
+    import uvicorn
+
+    if index_path is not None:
+        os.environ["INDEX_PATH"] = str(index_path)
+
+    uvicorn.run("findex.web.app:app", host=host, port=port, workers=workers)

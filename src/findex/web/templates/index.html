@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>findex search</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; line-height: 1.5; }
+    header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #e5e7eb; padding-bottom: .75rem; margin-bottom: 1.5rem; }
+    h1 { margin: 0; font-size: 1.5rem; }
+    .meta { color: #6b7280; font-size: .9rem; }
+    form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    input[type="text"] { flex: 1; min-width: 240px; padding: .55rem .75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; }
+    select, button { padding: .55rem .85rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: .95rem; }
+    button { background: #111827; color: #fff; border-color: #111827; cursor: pointer; }
+    button:hover { background: #374151; }
+    .error { padding: .75rem 1rem; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 6px; margin-bottom: 1rem; }
+    .hit { padding: 1rem 0; border-bottom: 1px solid #f3f4f6; }
+    .hit-title { font-size: 1.1rem; font-weight: 600; text-decoration: none; color: #1d4ed8; }
+    .hit-title:hover { text-decoration: underline; }
+    .hit-meta { font-size: .85rem; color: #6b7280; margin: .2rem 0 .4rem; }
+    .snippet { margin: 0; color: #374151; }
+    mark { background: #fef08a; padding: 0 .15rem; border-radius: 2px; }
+    .pager { display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem; }
+    .pager a { color: #1d4ed8; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>findex</h1>
+    <span class="meta">{{ num_docs }} documents indexed</span>
+  </header>
+
+  <form method="get" action="/">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search query (AND, OR, NOT, &quot;phrase&quot;)..." required>
+    <select name="scorer">
+      <option value="bm25" {% if scorer == "bm25" %}selected{% endif %}>BM25</option>
+      <option value="tfidf" {% if scorer == "tfidf" %}selected{% endif %}>TF-IDF</option>
+    </select>
+    <button type="submit">Search</button>
+  </form>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  {% if res %}
+    <p class="meta">Found {{ res.total }} results (page {{ res.page }} of {{ res.total_pages }})</p>
+    {% for hit in res.results %}
+      <article class="hit">
+        <a class="hit-title" href="/view/{{ hit.doc_id }}">{{ hit.title }}</a>
+        <div class="hit-meta">doc #{{ hit.doc_id }} &middot; score {{ "%.4f"|format(hit.score) }} &middot; {{ hit.path }}</div>
+        <p class="snippet">{{ hit.snippet | highlight(res.query) }}</p>
+      </article>
+    {% endfor %}
+
+    {% if res.total_pages > 1 %}
+      <nav class="pager">
+        {% if res.page > 1 %}
+          <a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&k={{ k }}&page={{ res.page - 1 }}">&larr; Previous</a>
+        {% endif %}
+        <span class="meta">Page {{ res.page }} / {{ res.total_pages }}</span>
+        {% if res.page < res.total_pages %}
+          <a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&k={{ k }}&page={{ res.page + 1 }}">Next &rarr;</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+</body>
+</html>

@@ -1,2 +1,14 @@
 def hello() -> str:
     return "Hello from findex!"
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
+
+    index_path: Path = Path("index.bin")
+    host: str = "0.0.0.0"
+    port: int = 8000
+    workers: int = 1

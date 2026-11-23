@@ -21,3 +21,6 @@ temp.txt
 .ruff_cache/
 .hypothesis/
 .coverage
+
+
+!deploy/index.bin
