@@ -2,6 +2,9 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from functools import cached_property
 
+import numpy as np
+from numpy.typing import NDArray
+
 
 @dataclass(frozen=True, slots=True)
 class Posting:
@@ -38,6 +41,8 @@ class Index(Mapping[str, list[Posting]]):
         self.docs = docs
         self.has_positions = has_positions
         self._closed = False
+        self._doc_lengths_np: np.ndarray | None = None
+        self._postings_np: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     def __getitem__(self, term: str) -> list[Posting]:
         return self._postings[term]
@@ -86,3 +91,34 @@ class Index(Mapping[str, list[Posting]]):
             self.docs.clear()
             self.__dict__.pop("avg_doc_length", None)
             self._closed = True
+    @property
+    def doc_lengths_np(self) -> NDArray[np.int32]:
+        arr: NDArray[np.int32] | None = getattr(self, "_doc_lengths_np", None)
+        if arr is None:
+            size = (max(self.docs.keys()) + 1) if self.docs else 0
+            arr = np.zeros(size, dtype=np.int32)
+            for doc_id, meta in self.docs.items():
+                arr[doc_id] = meta.length
+            self._doc_lengths_np = arr
+        return arr
+
+    def posting_arrays(self, term: str) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+        cache: dict[str, tuple[NDArray[np.int32], NDArray[np.int32]]] | None = getattr(
+            self, "_postings_np", None
+        )
+        if cache is None:
+            cache = {}
+            self._postings_np = cache
+        cached = cache.get(term)
+        if cached is not None:
+            return cached
+        plist = self._postings.get(term, ())
+        if not plist:
+            empty: NDArray[np.int32] = np.empty(0, dtype=np.int32)
+            pair = (empty, empty)
+        else:
+            doc_ids = np.fromiter((p.doc_id for p in plist), dtype=np.int32, count=len(plist))
+            freqs = np.fromiter((p.freq for p in plist), dtype=np.int32, count=len(plist))
+            pair = (doc_ids, freqs)
+        cache[term] = pair
+        return pair

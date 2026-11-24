@@ -1,6 +1,88 @@
 ![CI](https://github.com/04568964/findex/actions/workflows/ci.yml/badge.svg)
 
-**Live demo:** https://findex-3czj.onrender.com
+# findex
+
+Повнотекстовий і семантичний пошуковий рушій на Python із векторизованим BM25/TF-IDF на NumPy, гібридним ранжуванням та веб-інтерфейсом на FastAPI.
+
+**Live demo:** https://findex-3czj.onrender.com | **Demo video (2–3 min):** https://drive.google.com/file/d/1d6MpZrgn0oEQNm-ZThx5XsYJvEQDXWiX/view?usp=sharing
+
+![findex search demo](docs/gifdemo.gif)
+
+| Розмір корпусу | p95 на Render (`/search`) | Максимальне прискорення (NumPy vs Lab 3) |
+| :---: | :---: | :---: |
+| 1 001 документ (58 234 терми, 7 984 чанки) | 303.50 ms | 11.99x (частий терм `the`) |
+
+---
+
+## Архітектура та шлях даних
+
+```mermaid
+flowchart LR
+    C[Корпус .txt] --> CR[Краулер async httpx]
+    CR --> T[Токенізатор]
+    T --> I[Інвертований індекс int32 + .npy ембединги]
+    I --> S[Скорер: BM25 / TF-IDF NumPy / Cosine + RRF]
+    S --> API[FastAPI REST API]
+    API --> UI[Jinja2 Web UI]
+
+
+
+## Швидкий старт
+
+```bash
+uv sync
+uv run findex index data/ --out deploy/index.bin --positions
+uv run findex embed deploy/index.bin --out deploy/embeddings.npy
+uv run findex search deploy/index.bin "state school american" --mode hybrid -k 5
+uv run findex serve --host 0.0.0.0 --port 8000
+```
+
+Запуск у Docker:
+
+```bash
+docker build -t findex:1.0.0 .
+docker run --rm -p 8000:8000 -e PORT=8000 findex:1.0.0
+```
+
+---
+
+## Профілювання до оптимізацій
+
+Flame graphs: [`docs/flame_index.svg`](docs/flame_index.svg), [`docs/flame_search.svg`](docs/flame_search.svg).
+
+Три найзатратніші місця до векторизації (`cProfile` + `py-spy`; Scalene не підтримує нативний Windows):
+
+1. **`_io.open` у `build_index`** (`6.597 s` на холодному кеші / `0.121 s` на прогрітому) — нативний час (системні виклики ОС). Після прогріву кешу основний CPU-час припадає на `build_partial` (`0.766 s`, Python) і `tokenizer` (`0.499 s`, Python + нативний `re.Match.group`).
+2. **`BM25.score` у `search`** (`0.056 s` із `0.094 s`, 60% часу, 31 200 викликів на 200 запитів) — переважно Python-код (`score`, `Index.df`, `Index.num_docs`, `len`); нативний `math.log` займає лише `0.004 s`. Гіпотеза: перенесення арифметики на `int32`-масиви NumPy прибере цикл по об'єктах Python.
+3. **Агрегація скорів у `Searcher.search`** (`0.022 s`, 23%) та `heapq.nlargest` (`0.005 s`) — Python-цикл по словнику; заміна на масив `float64` і `np.argpartition` зменшить накладні витрати.
+
+---
+
+## Векторизація скорера на NumPy
+
+| Тип запиту | Запит | Lab 3 (ms) | NumPy (ms) | Прискорення |
+| :--- | :--- | :---: | :---: | :---: |
+| Частий терм | `the` | 0.6856 | 0.0572 | 11.99x |
+| Рідкісний терм | `004` | 0.0066 | 0.0160 | 0.41x |
+| 3 терми | `state school american` | 0.1218 | 0.0544 | 2.24x |
+
+На частому термі довгий список постінгів перекриває вартість виклику NumPy (11.99x). На рідкісному термі (`004`) список короткий, тому алокація буфера `scores_arr` і диспетчеризація ufunc дорожчі за кілька ітерацій у чистому Python (0.41x).
+
+---
+
+## Семантичний пошук і Hybrid RRF
+
+Модель: `sentence-transformers/all-MiniLM-L6-v2` через `fastembed` (ONNX Runtime), 7 984 нормалізовані чанки по 120 слів (`overlap=20`) у `deploy/embeddings.npy`.
+
+| Набір запитів | Lexical (BM25) P@5 | Semantic P@5 | Hybrid (RRF) P@5 |
+| :--- | :---: | :---: | :---: |
+| Lab 3 queries (10) | 0.660 | 0.640 | 0.560 |
+| Paraphrased (5) | 0.080 | 0.640 | 0.600 |
+| All queries (15) | 0.467 | 0.640 | 0.573 |
+
+На лексичних запитах BM25 (`0.660`) трохи випереджає Semantic (`0.640`). На перефразованих запитах без точних слів із документа BM25 падає до `0.080` через суворий `AND`, тоді як Semantic зберігає `0.640`. Hybrid RRF (`k=60`) покращує загальний результат відносно BM25 (`0.573` проти `0.467`), але поступається чистому Semantic через рівновагове змішування зі слабкою лексичною видачею.
+
+---
 
 # Результати аналізу корпусу
 
