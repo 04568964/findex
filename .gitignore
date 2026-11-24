@@ -21,6 +21,8 @@ temp.txt
 .ruff_cache/
 .hypothesis/
 .coverage
+*.npy
 
-
+!deploy/embeddings.npy
+!deploy/embeddings_doc_ids.npy
 !deploy/index.bin

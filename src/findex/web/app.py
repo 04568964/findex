@@ -12,9 +12,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
-from findex.models import Index
+from findex.models import Index, SearchResult
 from findex.scorers import BM25, Scorer, TfIdf
 from findex.searcher import Searcher
+from findex.semantic import Embedder, FastEmbedder, SemanticIndex, reciprocal_rank_fusion
 from findex.storage import open_index
 from findex.tokenizer import tokenizer
 from findex.web.config import Settings
@@ -23,6 +24,7 @@ from findex.web.schemas import (
     HealthResponse,
     ScorerName,
     SearchHit,
+    SearchMode,
     SearchResponse,
     StatsResponse,
 )
@@ -48,6 +50,21 @@ cast(dict[str, object], templates.env.filters)["highlight"] = _highlight
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = Settings()
     app.state.index = None
+    app.state.semantic_index = None
+    app.state.embedder = None
+
+    if settings.embeddings_path.is_file():
+        sem_idx = SemanticIndex.load(settings.embeddings_path)
+        app.state.semantic_index = sem_idx
+        app.state.embedder = FastEmbedder()
+        logger.info(
+            "Loaded semantic index from %s (%d chunks)",
+            settings.embeddings_path,
+            sem_idx.vectors.shape[0],
+        )
+    else:
+        logger.warning("Embeddings file not found: %s", settings.embeddings_path)
+
     if settings.index_path.is_file():
         with open_index(settings.index_path) as idx:
             app.state.index = idx
@@ -58,8 +75,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.warning("Index file not found: %s", settings.index_path)
         yield
 
+    app.state.semantic_index = None
+    app.state.embedder = None
 
-app = FastAPI(title="findex", version="0.7.0", lifespan=lifespan)
+
+app = FastAPI(title="findex", version="1.0.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -94,16 +114,66 @@ def get_index(idx: Annotated[Index | None, Depends(get_index_optional)]) -> Inde
     return idx
 
 
+def get_semantic_index_optional(request: Request) -> SemanticIndex | None:
+    return getattr(request.app.state, "semantic_index", None)
+
+
+def get_embedder_optional(request: Request) -> Embedder | None:
+    return getattr(request.app.state, "embedder", None)
+
+
 def _make_scorer(name: ScorerName) -> Scorer:
     return BM25() if name == "bm25" else TfIdf()
 
 
-def _execute_search(idx: Index, q: str, k: int, scorer: ScorerName, page: int) -> SearchResponse:
-    searcher = Searcher(idx, scorer=_make_scorer(scorer))
-    try:
-        all_results = searcher.search(q, top_k=idx.num_docs or 1, with_snippets=True)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+def _execute_search(
+    idx: Index,
+    q: str,
+    k: int,
+    scorer: ScorerName,
+    page: int,
+    mode: SearchMode = "lexical",
+    sem_idx: SemanticIndex | None = None,
+    embedder: Embedder | None = None,
+) -> SearchResponse:
+    if mode == "lexical":
+        searcher = Searcher(idx, scorer=_make_scorer(scorer))
+        try:
+            all_results = searcher.search(q, top_k=idx.num_docs or 1, with_snippets=True)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        if sem_idx is None or embedder is None:
+            raise HTTPException(status_code=503, detail="Semantic index is not loaded")
+
+        q_vec = embedder.embed_query(q)
+        sem_ranked = sem_idx.search(q_vec, top_k=idx.num_docs or 1)
+
+        if mode == "semantic":
+            ranked = sem_ranked
+        else:
+            searcher = Searcher(idx, scorer=_make_scorer(scorer))
+            try:
+                lex_hits = searcher.search(q, top_k=idx.num_docs or 1, with_snippets=False)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            ranked = reciprocal_rank_fusion(
+                [r.doc_id for r in lex_hits],
+                [doc_id for doc_id, _ in sem_ranked],
+                top_k=idx.num_docs or 1,
+            )
+
+        all_results = [
+            SearchResult(
+                score=score,
+                doc_id=doc_id,
+                title=idx.docs[doc_id].title,
+                path=idx.docs[doc_id].path,
+                snippet="",
+            )
+            for doc_id, score in ranked
+            if doc_id in idx.docs
+        ]
 
     total = len(all_results)
     total_pages = max(1, math.ceil(total / k))
@@ -122,6 +192,7 @@ def _execute_search(idx: Index, q: str, k: int, scorer: ScorerName, page: int) -
     ]
     return SearchResponse(
         query=q,
+        mode=mode,
         scorer=scorer,
         page=page,
         page_size=k,
@@ -154,12 +225,15 @@ def stats(idx: Annotated[Index, Depends(get_index)]) -> StatsResponse:
 @app.get("/search", response_model=SearchResponse)
 def search_api(
     idx: Annotated[Index, Depends(get_index)],
+    sem_idx: Annotated[SemanticIndex | None, Depends(get_semantic_index_optional)],
+    embedder: Annotated[Embedder | None, Depends(get_embedder_optional)],
     q: Annotated[str, Query(min_length=1, max_length=500)],
     k: Annotated[int, Query(ge=1, le=100)] = 10,
     scorer: Annotated[ScorerName, Query()] = "bm25",
+    mode: Annotated[SearchMode, Query()] = "lexical",
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> SearchResponse:
-    return _execute_search(idx, q, k, scorer, page)
+    return _execute_search(idx, q, k, scorer, page, mode=mode, sem_idx=sem_idx, embedder=embedder)
 
 
 @app.get("/docs/{doc_id}", response_model=DocResponse)
@@ -189,9 +263,12 @@ def get_doc_api(
 def home_page(
     request: Request,
     idx: Annotated[Index | None, Depends(get_index_optional)],
+    sem_idx: Annotated[SemanticIndex | None, Depends(get_semantic_index_optional)],
+    embedder: Annotated[Embedder | None, Depends(get_embedder_optional)],
     q: Annotated[str | None, Query()] = None,
     k: Annotated[int, Query(ge=1, le=50)] = 10,
     scorer: Annotated[ScorerName, Query()] = "bm25",
+    mode: Annotated[SearchMode, Query()] = "lexical",
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> HTMLResponse:
     search_res: SearchResponse | None = None
@@ -202,7 +279,16 @@ def home_page(
             error = "Index is not loaded."
         else:
             try:
-                search_res = _execute_search(idx, q.strip(), k, scorer, page)
+                search_res = _execute_search(
+                    idx,
+                    q.strip(),
+                    k,
+                    scorer,
+                    page,
+                    mode=mode,
+                    sem_idx=sem_idx,
+                    embedder=embedder,
+                )
             except HTTPException as exc:
                 error = str(exc.detail)
 
@@ -213,6 +299,7 @@ def home_page(
             "q": q or "",
             "k": k,
             "scorer": scorer,
+            "mode": mode,
             "page": page,
             "res": search_res,
             "error": error,

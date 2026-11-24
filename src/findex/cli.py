@@ -91,6 +91,8 @@ def search(
     top_k: Annotated[int, typer.Option("--top-k", "-k", help="Number of results.")] = 5,
     as_json: Annotated[bool, typer.Option("--json", help="Output results as JSON to stdout.")] = False,
     no_snippets: Annotated[bool, typer.Option("--no-snippets", help="Disable snippets.")] = False,
+    mode: Annotated[str, typer.Option("--mode", help="lexical | semantic | hybrid")] = "lexical",
+    embeddings: Annotated[Path | None, typer.Option("--embeddings", help="Path to embeddings .npy")] = None
 ) -> None:
     if not index_file.is_file():
         _fail(f"Index file not found: {index_file}")
@@ -99,8 +101,44 @@ def search(
 
     try:
         with open_index(index_file) as idx:
-            searcher = Searcher(idx, scorer=scorer_obj)
-            results = searcher.search(query, top_k=top_k, with_snippets=not no_snippets)
+            if mode == "lexical":
+                searcher = Searcher(idx, scorer=scorer_obj)
+                results = searcher.search(query, top_k=top_k, with_snippets=not no_snippets)
+            else:
+                emb_path = embeddings or Path("deploy/embeddings.npy")
+                if not emb_path.is_file():
+                    _fail(f"Embeddings file not found: {emb_path}")
+
+                from findex.models import SearchResult
+                from findex.semantic import FastEmbedder, SemanticIndex, reciprocal_rank_fusion
+
+                sem_idx = SemanticIndex.load(emb_path)
+                embedder = FastEmbedder()
+                q_vec = embedder.embed_query(query)
+
+                if mode == "semantic":
+                    ranked = sem_idx.search(q_vec, top_k=top_k)
+                else:
+                    searcher = Searcher(idx, scorer=scorer_obj)
+                    lex_hits = searcher.search(query, top_k=idx.num_docs or 1, with_snippets=False)
+                    sem_hits = sem_idx.search(q_vec, top_k=idx.num_docs or 1)
+                    ranked = reciprocal_rank_fusion(
+                        [r.doc_id for r in lex_hits],
+                        [doc_id for doc_id, _ in sem_hits],
+                        top_k=top_k,
+                    )
+
+                results = [
+                    SearchResult(
+                        score=score,
+                        doc_id=doc_id,
+                        title=idx.docs[doc_id].title,
+                        path=idx.docs[doc_id].path,
+                        snippet="",
+                    )
+                    for doc_id, score in ranked
+                    if doc_id in idx.docs
+                ]
     except (ValueError, RuntimeError) as exc:
         _fail(str(exc))
 
@@ -118,7 +156,7 @@ def search(
         sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
         return
 
-    table = Table(title=f"Results for '{query}' ({scorer})")
+    table = Table(title=f"Results for '{query}' ({mode}, {scorer})")
     table.add_column("Score", justify="right")
     table.add_column("Title")
     table.add_column("Snippet")
@@ -213,3 +251,23 @@ def serve(
         os.environ["INDEX_PATH"] = str(index_path)
 
     uvicorn.run("findex.web.app:app", host=host, port=port, workers=workers)
+
+@app.command()
+def embed(
+    index_path: Annotated[Path, typer.Argument(help="Path to index.bin")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output .npy path")] = Path(
+        "deploy/embeddings.npy"
+    ),
+    chunk_words: Annotated[int, typer.Option("--chunk-words", min=20)] = 120,
+    overlap: Annotated[int, typer.Option("--overlap", min=0)] = 20,
+) -> None:
+    if not index_path.is_file():
+        _fail(f"Index file not found: {index_path}")
+    from findex.semantic import build_semantic_index
+
+    with open_index(index_path) as idx:
+        sem_idx = build_semantic_index(idx, chunk_words=chunk_words, overlap=overlap)
+        sem_idx.save(out)
+    typer.echo(
+        f"Saved {sem_idx.vectors.shape[0]} chunk embeddings (dim={sem_idx.vectors.shape[1]}) to {out}"
+    )

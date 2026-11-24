@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
     index_path: Path = Path("index.bin")
+    embeddings_path: Path = Path("deploy/embeddings.npy")
     host: str = "0.0.0.0"
     port: int = 8000
     workers: int = 1

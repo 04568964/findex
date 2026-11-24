@@ -33,13 +33,17 @@
 
   <form method="get" action="/">
     <input type="text" name="q" value="{{ q }}" placeholder="Search query (AND, OR, NOT, &quot;phrase&quot;)..." required>
+    <select name="mode">
+      <option value="lexical" {% if mode == "lexical" %}selected{% endif %}>Lexical</option>
+      <option value="semantic" {% if mode == "semantic" %}selected{% endif %}>Semantic</option>
+      <option value="hybrid" {% if mode == "hybrid" %}selected{% endif %}>Hybrid (RRF)</option>
+    </select>
     <select name="scorer">
       <option value="bm25" {% if scorer == "bm25" %}selected{% endif %}>BM25</option>
       <option value="tfidf" {% if scorer == "tfidf" %}selected{% endif %}>TF-IDF</option>
     </select>
     <button type="submit">Search</button>
   </form>
-
   {% if error %}
     <div class="error">{{ error }}</div>
   {% endif %}
@@ -54,14 +58,14 @@
       </article>
     {% endfor %}
 
-    {% if res.total_pages > 1 %}
+   {% if res.total_pages > 1 %}
       <nav class="pager">
         {% if res.page > 1 %}
-          <a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&k={{ k }}&page={{ res.page - 1 }}">&larr; Previous</a>
+          <a href="/?q={{ q | urlencode }}&mode={{ mode }}&scorer={{ scorer }}&k={{ k }}&page={{ res.page - 1 }}">&larr; Previous</a>
         {% endif %}
         <span class="meta">Page {{ res.page }} / {{ res.total_pages }}</span>
         {% if res.page < res.total_pages %}
-          <a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&k={{ k }}&page={{ res.page + 1 }}">Next &rarr;</a>
+          <a href="/?q={{ q | urlencode }}&mode={{ mode }}&scorer={{ scorer }}&k={{ k }}&page={{ res.page + 1 }}">Next &rarr;</a>
         {% endif %}
       </nav>
     {% endif %}

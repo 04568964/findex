@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 ScorerName = Literal["bm25", "tfidf"]
+SearchMode = Literal["lexical", "semantic", "hybrid"]
 
 
 class SearchHit(BaseModel):
@@ -15,6 +16,7 @@ class SearchHit(BaseModel):
 
 class SearchResponse(BaseModel):
     query: str
+    mode: SearchMode = "lexical"
     scorer: ScorerName
     page: int
     page_size: int
